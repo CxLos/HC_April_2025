@@ -1,44 +1,40 @@
 # =================================== IMPORTS ================================= #
-import csv, sqlite3
-import re
-import numpy as np 
+
 import pandas as pd 
-import seaborn as sns 
-import matplotlib.pyplot as plt 
-import plotly.figure_factory as ff
 import plotly.graph_objects as go
-from geopy.geocoders import Nominatim
-from folium.plugins import MousePosition
 import plotly.express as px
-from datetime import datetime
-import folium
+from datetime import datetime, timedelta
 import os
-import sys
-# ------
+import dash
+from dash import dcc, html
+from collections import Counter
+
+# Google Web Credentials
 import json
 import base64
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-# ------
-import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output, State
-from dash.development.base_component import Component
 
 # 'data/~$bmhc_data_2024_cleaned.xlsx'
 # print('System Version:', sys.version)
+
+# ------ Pandas Display Options ------ #
+pd.set_option('display.max_rows', None)  # Show all rows
+pd.set_option('display.max_columns', None)  # Show all columns (if needed)
+pd.set_option('display.width', 1000)  # Adjust the width to prevent line wrapping
+pd.reset_option('display.max_columns')
 # -------------------------------------- DATA ------------------------------------------- #
 
 current_dir = os.getcwd()
 current_file = os.path.basename(__file__)
 script_dir = os.path.dirname(os.path.abspath(__file__))
-# data_path = 'data/Engagement_March_2025.xlsx'
+# data_path = 'data/Submit_Review_Responses.xlsx'
 # file_path = os.path.join(script_dir, data_path)
 # data = pd.read_excel(file_path)
 # df = data.copy()
 
 # Define the Google Sheets URL
-sheet_url = "https://docs.google.com/spreadsheets/d/1D0oOioAfJyNCHhJhqFuhxxcx3GskP9L-CIL1DcOyhug/edit?resourcekey=&gid=1261604285#gid=1261604285"
+sheet_url = "https://docs.google.com/spreadsheets/d/1EXmlLJ2epGxnFcreWFp4p4ShHFyWcuUfEtC3SIjwkKA/edit?resourcekey=&gid=1922572542#gid=1922572542"
 
 # Define the scope
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -55,58 +51,79 @@ else:
         creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
     else:
         raise FileNotFoundError("Service account JSON file not found and GOOGLE_CREDENTIALS is not set.")
+    
+expected_headers = [
+
+]
 
 # Authorize and load the sheet
 client = gspread.authorize(creds)
 sheet = client.open_by_url(sheet_url)
+# worksheet = sheet.get_worksheet(0)  
+# values = worksheet.get_all_values()
+# headers = values[0] 
+# rows = values[1:] # Remaining rows as data
+
+# data = pd.DataFrame(rows, columns=headers)
+# data = pd.DataFrame(worksheet.get_all_records())
+# data = pd.DataFrame(client.open_by_url(sheet_url).get_all_records())
 data = pd.DataFrame(client.open_by_url(sheet_url).sheet1.get_all_records())
 df = data.copy()
-
-# Trim leading and trailing whitespaces from column names
-df.columns = df.columns.str.strip()
-
-# Trim whitespace from values in all columns
-df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
-# Define a discrete color sequence
-# color_sequence = px.colors.qualitative.Plotly
-
-df['Date of Activity'] = pd.to_datetime(df['Date of Activity'], errors='coerce')
-
-# Filtered df where 'Date of Activity:' is january to april
-df = df[df['Date of Activity'].dt.month.isin([1, 2, 3, 4])]
 
 # Get the reporting month:
 current_month = datetime(2025, 4, 1).strftime("%B")
 report_year = datetime(2025, 4, 1).strftime("%Y")
 
+# Trim leading and trailing whitespaces from column names
+df.columns = df.columns.str.strip()
+
+# Filtered df where 'Date of Activity:' is between Ocotber to December:
+df['Date of Event'] = pd.to_datetime(df['Date of Event'], errors='coerce')
+df = df[df['Date of Event'].dt.month == 4]
+df['Month'] = df['Date of Event'].dt.month_name()
+
 # print(df.head(10))
 # print('Total Marketing Events: ', len(df))
-# print('Column Names: \n', df.columns.tolist())
+# print('Column Names: \n', df.columns)
 # print('DF Shape:', df.shape)
 # print('Dtypes: \n', df.dtypes)
 # print('Info:', df.info())
 # print("Amount of duplicate rows:", df.duplicated().sum())
+
 # print('Current Directory:', current_dir)
 # print('Script Directory:', script_dir)
 # print('Path to data:',file_path)
 
 # ================================= Columns ================================= #
 
-columns = [
-    'Timestamp',
-    'Date of Activity', 
-    'Person submitting this form:',
-    'Activity Duration (minutes):', 
-    'Care Network Activity:', 
-    'Entity name:', 
-    'Brief Description:', 
-    'Activity Status:', 
-    'BMHC Administrative Activity:', 
-    'Total travel time (minutes):', 
-    'Community Outreach Activity:', 
-    'Number engaged at Community Outreach Activity:', 
-    'Any recent or planned changes to BMHC lead services or programs?'
+columns =[
+'Timestamp', 
+'Date of Event', 
+'First Name', 
+'Last Name',
+'Email',
+'Phone Number', 
+'Month'
+'Column 19', 
+
+# Visuals
+'Zip Code', 
+'Age', 
+'Weight Lbs. (numbers only)',
+'Systolic Blood Pressure',
+'Diastolic Blood Pressure', 
+'Heart Rate (numbers only)', 
+'Was the information/ activity provided useful?', 
+'Preferred Method of Contact',
+'Which topics are you interested in?', 
+'Are you interested in creating a Healthy Cuts account?',
+'Would you like to enroll as a BMHC client/ get scheduled for an appointment?', 
+'Are you interested in participating in our Movement is Medicine exercise classes?', 
+'Did you have any vitals checked today?', 
+'Would you like information on our partnered clinical trials, their benefits to you, and compensation amount?', 
+
+# Table
+'Do you have any feedback about this engagement?', 
 ]
 
 # =============================== Missing Values ============================ #
@@ -122,110 +139,94 @@ columns = [
 # if duplicate_columns:
 #     print(f"Duplicate columns found: {duplicate_columns}")
 
-# Rename columns
 df.rename(
     columns={
-        "Activity Duration (minutes):": "Activity Duration",
-        "Total travel time (minutes):": "Travel",
-        "Person submitting this form:": "Person",
-        "Activity Status:": "Activity Status",
-        "Entity name:": "Entity",
-        "Care Network Activity:": "Care Activity",
-        "BMHC Administrative Activity:": "Admin Activity",
-        "Community Outreach Activity:": "Outreach Activity",
-        "Number engaged at Community Outreach Activity:": "Number Engaged",
-    }, 
-inplace=True)
-
-# print('Entity Names:', df['Entity'].unique().tolist())
-
-entitiy_unique = [
-     'GUD LIFE - BMHC - Pflugerville', 'GUD LIFE met with Dominique', 'GUD LIFE Board & Executive Staff', 'GUD LIFE - Potential with Lone Star Circle of Care', 'GudLife','GUD LIFE: AL Community Development Corporation - ALCDC - BizNess Program,  Helpers of Change','GUD LIFE - Central Texas Learning Festival', 'Unparallel Preparatory Academy', 'GUD LIFE & Building Promises', 'GUD LIFE & ALC', 'Gudlife', 'Bristol Myers', 'Healing Hands Birthing Project', 'American YouthWorks', 'St David’s Foundation', 'Cardurion Pharm', 'GUD LIFE & BMHC & Integral Care Scheduling Meeting - Emails', 'GudLife, Integral Care',"GudLife, Integral Care", "Black Men's Health Clinic, Austin Spurs", "Black Men's Health Clinic, GudLife", 'GudLife, ALCDC Board', "Black Men's Health Clinic, City of Austin"
-]
-
-df['Entity'] = (
-    df['Entity']
-    .replace({
-        'GUD LIFE - BMHC - Pflugerville': 'GudLife',
-        'GUD LIFE met with Dominique': 'GudLife',
-        'GUD LIFE Board & Executive Staff': 'GudLife',
-        'GUD LIFE - Potential with Lone Star Circle of Care': 'GudLife',
-        'GUD LIFE: AL Community Development Corporation - ALCDC - BizNess Program,  Helpers of Change': 'GudLife',
-        'GUD LIFE - Central Texas Learning Festival': 'GudLife',
-        'GUD LIFE & Building Promises': 'GudLife',
-        'GUD LIFE & ALC': 'GudLife',
-        'GudLife': 'GudLife',
-        'Gudlife': 'GudLife',
-        'GudLife, Integral Care': 'GudLife',
-        "GudLife, Integral Care": 'GudLife',
-        "Black Men's Health Clinic, GudLife": 'GudLife',
-        'GudLife, ALCDC Board': 'GudLife',
-        'BMHC': 'BMHC',
-        'GUD LIFE (BMHC)': 'GudLife'
-    })
+        # Numeric
+        'Zip Code': 'ZIP',
+        'Age': 'Age',
+        'Weight Lbs. (numbers only)': 'Weight',
+        'Systolic Blood Pressure': 'Systolic',
+        'Diastolic Blood Pressure': 'Diastolic',
+        'Heart Rate (numbers only)': 'Heart Rate',
+        
+        # Yes/ No
+        'Was the information/ activity provided useful?': 'Info Useful',
+        'Are you interested in creating a Healthy Cuts account?': 'Healthy Cuts',
+        'Would you like to enroll as a BMHC client/ get scheduled for an appointment?': 'Enroll',
+        'Are you interested in participating in our Movement is Medicine exercise classes?': 'MIM',
+        'Did you have any vitals checked today?': 'Vitals',
+        'Would you like information on our partnered clinical trials, their benefits to you, and compensation amount?': 'Clinical Trials',
+        
+        # Other
+        'Preferred Method of Contact': 'Contact Method',
+        'Which topics are you interested in?': 'Topics',
+        'Do you have any feedback about this engagement?': 'Feedback',
+    },
+    inplace=True
 )
 
-# Normalize any "Gud Life", "GUD LIFE", "Gudlife", etc., to "GudLife" using regex
-df['Entity'] = df['Entity'].str.replace(r'gud\s*life', 'GudLife', flags=re.IGNORECASE, regex=True)
+# ------------------------ Total Reviews ---------------------------- #
 
+hc_interactions = len(df)
+# print('Total Reviews:', total_engagements)
 
-# df['Entity'] = df['Entity'].replace(
-#     to_replace=r'\bGUD[\s]?LIFE\b|\bGud[\s]?Life\b', 
-#     value='GudLife', 
-#     regex=True
-# )
+# ------------------------------- Age Distribution ---------------------------- #
 
-# 
-df = df[df['Entity'] == 'GudLife']
+# # Define a function to categorize ages into age groups
+def categorize_age(age):
+    if age == "":
+        return "N/A"
+    elif 10 <= age <= 19:
+        return '10-19'
+    elif 20 <= age <= 29:
+        return '20-29'
+    elif 30 <= age <= 39:
+        return '30-39'
+    elif 40 <= age <= 49:
+        return '40-49'
+    elif 50 <= age <= 59:
+        return '50-59'
+    elif 60 <= age <= 69:
+        return '60-69'
+    elif 70 <= age <= 79:
+        return '70-79'
+    else:
+        return '80+'
 
-# ========================= Total Engagements ========================== #
+# # Apply the function to create the 'Age_Group' column
+df['Age_Group'] = df['Age'].apply(categorize_age)
 
-# Total number of engagements:
-total_engagements = len(df)
-# print('Total Engagements:', total_engagements)
+# # Group by 'Age_Group' and count the number of patient visits
+df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Patient_Visits')
 
-# -------------------------- Engagement Hours -------------------------- #
+# # Sort the result by the minimum age in each group
+age_order = [
+            '10-19',
+            '20-29', 
+            '30-39', 
+            '40-49', 
+            '50-59', 
+            '60-69', 
+            '70-79',
+            '80+'
+             ]
 
-# Sum of 'Activity Duration (minutes):' dataframe converted to hours:
+df_decades['Age_Group'] = pd.Categorical(df_decades['Age_Group'], categories=age_order, ordered=True)
+df_decades = df_decades.sort_values('Age_Group')
+# print(df_decades.value_counts())
 
-# Convert 'Activity Duration (minutes):' to numeric
-df['Activity Duration'] = pd.to_numeric(df['Activity Duration'], errors='coerce')
-engagement_hours = df['Activity Duration'].sum()/60
-engagement_hours = round(engagement_hours)
-
-# -------------------------- Total Travel Time ------------------------ #
-
-df['Travel'] = (
-    df['Travel']
-    .replace({
-    'Sustainable Food Center + APH Health Education Strategy Meeting & Planning Activities', 
-    0
-}))
-
-df['Travel'] = pd.to_numeric(df['Travel'], errors='coerce').fillna(0)
-
-# Sum travel time in hours and round
-total_travel_time = round(df['Travel'].sum() / 60)
-# print(total_travel_time)
-
-# travel time value counts
-# print(df['Total travel time (minutes):'].value_counts())
-
-# ---------------------------- Activity Status ----------------------- #
-
-df_activity_status = df.groupby('Activity Status').size().reset_index(name='Count')
-
-status_bar=px.bar(
-    df_activity_status,
-    x='Activity Status',
-    y='Count',
-    color='Activity Status',
-    text='Count',
+# Age Bar Chart
+age_fig=px.bar(
+    df_decades,
+    x='Age_Group',
+    y='Patient_Visits',
+    color='Age_Group',
+    text='Patient_Visits',
 ).update_layout(
-    height=460, 
-    width=780,
+    height=700, 
+    width=1000,
     title=dict(
-        text='Activity Status',
+        text='Client Age Distribution',
         x=0.5, 
         font=dict(
             size=25,
@@ -243,45 +244,43 @@ status_bar=px.bar(
         tickfont=dict(size=18),  # Adjust font size for the tick labels
         title=dict(
             # text=None,
-            text="Status",
+            text="Age Group",
             font=dict(size=20),  # Font size for the title
         ),
-        # showticklabels=False  # Hide x-tick labels
-        showticklabels=True  # Hide x-tick labels
     ),
     yaxis=dict(
         title=dict(
-            text='Count',
+            text='Number of Visits',
             font=dict(size=20),  # Font size for the title
         ),
     ),
     legend=dict(
-        # title='Support',
         title_text='',
         orientation="v",  # Vertical legend
         x=1.05,  # Position legend to the right
         y=1,  # Position legend at the top
         xanchor="left",  # Anchor legend to the left
         yanchor="top",  # Anchor legend to the top
-        # visible=False
-        visible=True
+        visible=False
     ),
     hovermode='closest', # Display only one hover label per trace
     bargap=0.08,  # Reduce the space between bars
     bargroupgap=0,  # Reduce space between individual bars in groups
 ).update_traces(
     textposition='auto',
-    hovertemplate='<b>Status:</b> %{label}<br><b>Count</b>: %{y}<extra></extra>'
+    hovertemplate='<b>Age:</b>: %{label}<br><b>Count</b>: %{y}<extra></extra>'
 )
 
-# Support Pie Chart
-status_pie = px.pie(
-    df_activity_status,
-    names='Activity Status',
-    values='Count',
+# Pie chart showing values and percentages:
+
+# # Age Pie Chart
+age_pie = px.pie(
+    df_decades,
+    names='Age_Group',
+    values='Patient_Visits',
 ).update_layout(
-    title='Activity Status',
-    height=450,
+    height=700, 
+    title='Client Age Distribution',
     title_x=0.5,
     font=dict(
         family='Calibri',
@@ -289,472 +288,997 @@ status_pie = px.pie(
         color='black'
     )
 ).update_traces(
-    rotation=0,
-    textinfo='value+percent',
+    # textinfo='value+percent',
+    texttemplate='%{value} (%{percent:.2%})',
     hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
 )
 
-# ----------------------------- Admin Activity --------------------------- #
+# ---------------------- Zip 2 --------------------- #
 
-# print("Admin Unique Before: \n", df['Admin Activity'].unique().tolist())
+# print('ZIP Unique Before: \n', df['ZIP'].unique().tolist())
 
-categories = [
-    '100 Black Men of Austin Quarterly Partnership Review (QPR)',
-    'Any Baby Can Tour & Partnership Meeting',
-    'BMHC + Breakthrough of Central Texas Partnership Discussion',
-    'BMHC + Community First Village Neighborhood Care Team Planning Meeting',
-    'BMHC + Community First Village Onsite Outreach Strategy Huddle',
-    'BMHC + Community First Village Onsite Outreach Strategy Planning Huddle',
-    'BMHC + Gudlife Outreach Strategy Huddle',
-    'BMHC + Gudlife Strategy Huddle',
-    'BMHC + KAZI Basketball Tournament',
-    'BMHC Gudlife Meeting',
-    'BMHC Pflugerville Asset Mapping Activities',
-    'BMHC Tour (Austin Mayor Kirk Watson & Austin City Council Member District 4 "Chito" Vela)',
-    'Biweekly PSH staffing with ECHO',
-    'Child Inc Travis County HeadStart Program (Fatherhood Program Event)',
-    'Communication & Correspondence',
-    'Community First Village Onsite Outreach',
-    'Community First Village Outreach Strategy Huddle',
-    'Compliance & Policy Enforcement',
-    'Downtown Austin Community Court Onsite Outreach',
-    'End of Week 1 to 1 Performance Review',
-    'Financial & Budgetary Management',
-    'HR Support',
-    'Housing Authority of Travis County (Self-Care Day) Outreach Event',
-    'Housing Authority of Travis County Quarterly Partnership Review (QPR)',
-    'Impact Forms Follow Up Meeting',
-    'Implementation Studios Planning & Strategy Meeting',
-    'Meeting with Cameron',
-    'Onboarding',
-    'Outreach & Navigation Leads 1 to 1 Strategy Meeting',
-    'Outreach 1 to 1 Strategy Meetings',
-    'Outreach Onboarding (Jordan Calbert)',
-    'PSH Audit for ECHO',
-    'PSH file updates and case staffing',
-    'Record Keeping & Documentation',
-    'Research & Planning',
-    'PSH support call with Dr Wallace'
+zip_unique =[
+
 ]
+        
+zip_mode = df['ZIP'].mode()[0]
 
-categories = ['1 to 1 Outreach Strategy Meetings', 'BMHC & GUD LFE Huddle Meeting', 'BMHC & GUD LIFE Weekly Huddle', 'BMHC Gudlife Huddle', 'BMHC Internal & External Emails and Phone Calls Performed', 'BOLO list and placement', 'Bi-Partner Neighbor Partner Engagement Meeting', 'Central Health Virtual Lunch', 'Communication & Correspondence', 'Community Engagement & Events', 'Community First Village Onsite Outreach & Healthy Cuts Preventative Screenings', 'End of Week Outreach Performance Reviews', 'Financial & Budgetary Management', 'HMIS monthly reports submission to ECHO', 'HR Support', 'HSO stakeholder meeting', 'Implementation Studios Planning Meeting', 'In-Person Key Leaders Huddle', 'MOU conversation with Extended Stay America', 'Manor 5K Planning Meeting & Follow Up Activities', 'Meeting', 'Outreach & Navigation Team Leads Huddle', 'Outreach Onboarding Activities (Jordan Calbert)', 'PSH', 'PSH iPilot', 'Record Keeping & Documentation', 'Research & Planning', 'Training', 'client referrals/community partnership', 'homeless advocacy meeting', 'outreach coordination meeting', 'timesheet completion and submit to Dr. Wallace', 'weekly HMIS updates and phone calls for clients on BOLO list']
-
-df['Admin Activity'] = (
-    df['Admin Activity']
+df['ZIP'] = (
+    df['ZIP']
+    .astype(str)
     .str.strip()
     .replace({
-            "" : "N/A",
-        })
+        "": zip_mode,
+    })
 )
 
+df['ZIP'] = df['ZIP'].fillna(zip_mode)
+df['ZIP'] = df['ZIP'].astype(str)
 
-# Group by 'BMHC Administrative Activity:' dataframe:
-admin_activity = df.groupby('Admin Activity').size().reset_index(name='Count')
-# print(admin_activity["Admin Activity"].unique().tolist())
+df_z = df['ZIP'].value_counts().reset_index(name='Count')
 
-admin_bar=px.bar(
-    admin_activity,
-    x="Admin Activity",
-    y='Count',
-    color="Admin Activity",
+# print('ZIP Unique After: \n', df_z['ZIP'].unique().tolist())
+
+zip_fig =px.bar(
+    df_z,
+    x='Count',
+    y='ZIP',
+    color='ZIP',
     text='Count',
+    orientation='h'  # Horizontal bar chart
 ).update_layout(
-    height=850, 
-    width=1900,
-    title=dict(
-        text='Admin Activity Bar Chart',
-        x=0.5, 
-        font=dict(
-            size=25,
-            family='Calibri',
-            color='black',
-            )
-    ),
-    font=dict(
-        family='Calibri',
-        size=18,
-        color='black'
-    ),
-    xaxis=dict(
-        tickangle=-20,  # Rotate x-axis labels for better readability
-        tickfont=dict(size=18),  # Adjust font size for the tick labels
-        title=dict(
-            # text=None,
-            text="Admin Activity",
-            font=dict(size=20),  # Font size for the title
-        ),
-        showticklabels=False
-    ),
-    yaxis=dict(
-        title=dict(
-            text='Count',
-            font=dict(size=20),  # Font size for the title
-        ),
-    ),
-    legend=dict(
-        title='',
-        orientation="v",  # Vertical legend
-        x=1.05,  # Position legend to the right
-        y=1,  # Position legend at the top
-        xanchor="left",  # Anchor legend to the left
-        yanchor="top",  # Anchor legend to the top
-        visible=True
-        # visible=False
-    ),
-    hovermode='closest', # Display only one hover label per trace
-    bargap=0.08,  # Reduce the space between bars
-    bargroupgap=0,  # Reduce space between individual bars in groups
-).update_traces(
-    textposition='auto',
-    hovertemplate='<b></b> %{label}<br><b>Count</b>: %{y}<extra></extra>'
-)
-
-# Insurance Status Pie Chart
-admin_pie=px.pie(
-    admin_activity,
-    names="Admin Activity",
-    values='Count'
-).update_layout(
-    height=850,
-    width=1700,
-    # showlegend=False,
-    showlegend=True,
-    title='Admin Activity Pie Chart',
+    title='Number of Clients by Zip Code',
+    xaxis_title='Residents',
+    yaxis_title='Zip Code',
     title_x=0.5,
+    height=950,
+    width=1500,
     font=dict(
         family='Calibri',
         size=17,
         color='black'
-    )
-).update_traces(
-    rotation=130,
-    textinfo='value+percent',
-    # textinfo='none',
-    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>',
-    # pull = [0.1 if v < 5 else 0.01 + (v / max(admin_activity["Count"]) * 0.05) for v in admin_activity["Count"]]
-
-    # pull=[0.15 if v < 5 else 0.04 for v in admin_activity["Count"]]  # Pull out small slices more, and others slightly
-    #  pull=[0.1 if v < 5 else 0 for v in admin_activity["Count"]]  # Pull out small slices more, no pull for large ones
-)
-
-# -------------------------- Care Network Activity ----------------------- #
-
-print("Care Network Unique \n", df['Care Activity'].unique().tolist())
-
-df['Care Activity'] = (
-    df['Care Activity']
-    .str.strip()
-    .replace({
-            "" : "N/A",
-        })
-)
-
-# Group by 'Care Network Activity:' dataframe:
-care_network_activity = df.groupby('Care Activity').size().reset_index(name='Count')
-
-# print("Care Netowrk Activities: \n", care_network_activity.value_counts())
-
-care_bar=px.bar(
-    care_network_activity,
-    x="Care Activity",
-    y='Count',
-    color="Care Activity",
-    text='Count',
-).update_layout(
-    height=850, 
-    width=1800,
-    title=dict(
-        text='Care Network Activity Bar Chart',
-        x=0.5, 
-        font=dict(
-            size=25,
-            family='Calibri',
-            color='black',
-            )
     ),
-    font=dict(
-        family='Calibri',
-        size=18,
-        color='black'
+        yaxis=dict(
+        tickangle=0  # Keep y-axis labels horizontal for readability
     ),
-    xaxis=dict(
-        tickangle=-20,  # Rotate x-axis labels for better readability
-        tickfont=dict(size=18),  # Adjust font size for the tick labels
-        title=dict(
-            # text=None,
-            text="Care Network Activity",
-            font=dict(size=20),  # Font size for the title
-        ),
-        showticklabels = False
-    ),
-    yaxis=dict(
-        title=dict(
-            text='Count',
-            font=dict(size=20),  # Font size for the title
-        ),
-    ),
-    legend=dict(
-        title='',
+        legend=dict(
+        title='ZIP Code',
         orientation="v",  # Vertical legend
         x=1.05,  # Position legend to the right
-        y=1,  # Position legend at the top
         xanchor="left",  # Anchor legend to the left
-        yanchor="top",  # Anchor legend to the top
-        # visible=False
+        y=1,  # Position legend at the top
+        yanchor="top"  # Anchor legend at the top
     ),
-    hovermode='closest', # Display only one hover label per trace
-    bargap=0.08,  # Reduce the space between bars
-    bargroupgap=0,  # Reduce space between individual bars in groups
 ).update_traces(
-    textposition='auto',
-    hovertemplate='<b></b> %{label}<br><b>Count</b>: %{y}<extra></extra>'
+    textposition='auto',  # Place text labels inside the bars
+    textfont=dict(size=30),  # Increase text size in each bar
+    # insidetextanchor='middle',  # Center text within the bars
+    textangle=0,            # Ensure text labels are horizontal
+    hovertemplate='<b>ZIP Code</b>: %{y}<br><b>Count</b>: %{x}<extra></extra>'
 )
 
-# Insurance Status Pie Chart
-care_pie=px.pie(
-    care_network_activity,
-    names="Care Activity",
-    values='Count'
+# =============================== Was the information useful? ============================ #
+
+# print("Info Useful Unique Before: \n", df['Info Useful'].unique().tolist())
+# print("Info Useful Value Counts: \n", df['Info Useful'].value_counts())
+
+df['Info Useful'] = (df['Info Useful']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A"
+    })          
+)
+
+# print("Info Useful Unique After: \n", df['Info Useful'].unique().tolist())
+
+df_useful = df['Info Useful'].value_counts().reset_index(name='Count')
+
+useful_fig = px.bar(
+    df_useful, 
+    x='Info Useful', 
+    y='Count',
+    color='Info Useful', 
+    text='Count',  
 ).update_layout(
-    height=850,
-    width=1700,
-    # showlegend=False,
-    title='Care Network Activity Pie Chart',
-    title_x=0.5,
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Was the information useful?',
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
     font=dict(
         family='Calibri',
         size=17,
         color='black'
-    )
+    ),
+    xaxis=dict(
+        title=dict(
+            # text=None,
+            text="Response",
+            font=dict(size=20), 
+        ),
+        tickmode='array',
+        tickangle=0,
+        # showticklabels=True,
+        showticklabels=False,
+    ),
+    yaxis=dict(
+        title=dict(
+            # text=None,
+            text="Count",
+            font=dict(size=20), 
+        ),
+    ),
+    legend=dict(
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
+    ),
+    # margin=dict(t=60, r=0, b=70, l=0),
 ).update_traces(
-    rotation=140,
-    textinfo='value+percent',
-    # textinfo='none',
-    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>',
-    # pull=[0.15 if v < 5 else 0.04 for v in admin_activity["Count"]]  # Pull out small slices more, and others slightly
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Response</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
 )
 
-# --------------------------Community Outreach Activity ---------------------- #
+useful_pie = px.pie(
+    df_useful,
+    names='Info Useful',
+    values='Count',
+    color='Info Useful',
+).update_layout(
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Ratio of Was the information useful?', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        # title='Rating',
+        title=None,
+        orientation="v",  # Vertical legend
+        x=1.05,  # Position legend to the right
+        xanchor="left",  # Anchor legend to the left
+        y=1,  # Position legend at the top
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,  #
+    textfont=dict(size=19),  
+    texttemplate='%{value} (%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
 
-# Replace values in the original DataFrame before grouping
-df['Outreach Activity'] = (
-    df['Outreach Activity']
+# =============================== Interested in Healthy Cuts ? ============================ #
+
+# print("Healthy Cuts Unique Before: \n", df['Healthy Cuts'].unique().tolist())
+# print("Healthy Cuts Value Counts: \n", df['Healthy Cuts'].value_counts())
+
+df['Healthy Cuts'] = (df['Healthy Cuts']
+    .astype(str)
     .str.strip()
     .replace({
-            "" : "N/A",
-            "NA" : "N/A",
-        })
+        "" : "N/A"
+    })          
 )
 
-# Group by 'Community Outreach Activity:' dataframe
-community_outreach_activity = df.groupby('Outreach Activity').size().reset_index(name='Count')
+# print("Healthy Cuts Unique After: \n", df['Healthy Cuts'].unique().tolist())
 
-# print(community_outreach_activity.value_counts())
+df_hc = df['Healthy Cuts'].value_counts().reset_index(name='Count')
 
-community_bar=px.bar(
-    community_outreach_activity,
-    x="Outreach Activity",
+hc_fig = px.bar(
+    df_hc, 
+    x='Healthy Cuts', 
     y='Count',
-    color="Outreach Activity",
-    text='Count',
+    color='Healthy Cuts', 
+    text='Count',  
 ).update_layout(
-    height=850, 
-    width=1800,
+    height=600, 
+    width=1050,
     title=dict(
-        text='Community Outreach Activity Bar Chart',
+        text=f'{current_month} Interested in Becoming a Healthy Cuts Member?',
         x=0.5, 
         font=dict(
-            size=25,
+            size=22,
             family='Calibri',
             color='black',
-            )
+        )
     ),
     font=dict(
         family='Calibri',
-        size=18,
+        size=17,
         color='black'
     ),
     xaxis=dict(
-        tickangle=-20,  # Rotate x-axis labels for better readability
-        tickfont=dict(size=18),  # Adjust font size for the tick labels
         title=dict(
-            # text=None,
-            text="Community Outreach Activity",
-            font=dict(size=20),  # Font size for the title
+            text="Response",
+            font=dict(size=20), 
         ),
-        showticklabels=False
-        # showticklabels=True 
+        tickmode='array',
+        tickangle=0,
+        # showticklabels=True,
+        showticklabels=False,
     ),
     yaxis=dict(
         title=dict(
             text="Count",
-            font=dict(size=20),  # Font size for the title
+            font=dict(size=20), 
         ),
     ),
     legend=dict(
-        title="",
-        orientation="v",  # Vertical legend
-        x=1.05,  # Position legend to the right
-        y=1,  # Position legend at the top
-        xanchor="left",  # Anchor legend to the left
-        yanchor="top",  # Anchor legend to the top
-        visible=True
-        # visible=False
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
     ),
-    hovermode='closest', # Display only one hover label per trace
-    bargap=0.08,  # Reduce the space between bars
-    bargroupgap=0,  # Reduce space between individual bars in groups
 ).update_traces(
-    textangle=0,
-    textposition='auto',
-    hovertemplate='<b></b> %{label}<br><b>Count</b>: %{y}<extra></extra>'
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Response</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
 )
 
-# Insurance Status Pie Chart
-community_pie=px.pie(
-    community_outreach_activity,
-    names="Outreach Activity",
-    values='Count'
+hc_pie = px.pie(
+    df_hc,
+    names='Healthy Cuts',
+    values='Count',
+    color='Healthy Cuts',
 ).update_layout(
-    height=850,
-    width=1700,
-    title='Community Outreach Activity Pie Chart',
-    title_x=0.5,
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Interested in Becoming a Healthy Cuts Member?', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+# =============================== Enroll as BMHC client? ============================ #
+
+# print("Enroll Unique Before: \n", df['Enroll'].unique().tolist())
+# print("Enroll Value Counts: \n", df['Enroll'].value_counts())
+
+df['Enroll'] = (df['Enroll']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A"
+    })          
+)
+
+# print("Enroll Unique After: \n", df['Enroll'].unique().tolist())
+
+df_enroll = df['Enroll'].value_counts().reset_index(name='Count')
+
+enroll_fig = px.bar(
+    df_enroll, 
+    x='Enroll', 
+    y='Count',
+    color='Enroll', 
+    text='Count',  
+).update_layout(
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Interested in Enrolling as a BMHC Client?', 
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
     font=dict(
         family='Calibri',
         size=17,
-        color='black'
-    )
-).update_traces(
-    rotation=10,
-    textinfo='value+percent',
-    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>',
-    # The code is creating a list called `pull` using a list comprehension. For each value `v` in the
-    # "Count" column of the `admin_activity` DataFrame (assuming it's a pandas DataFrame), it assigns
-    # 0.15 to the corresponding element in `pull` if `v` is less than 5, and 0.05 if `v` is greater
-    # than or equal to 5. This code is essentially adjusting the values based on the condition
-    # provided.
-    # pull=[0.15 if v < 5 else 0.05 for v in admin_activity["Count"]]  # Pull out small slices more, and others slightly
-)
-
-# ------------------------ Person Submitting Form -------------------- #
-
-#  Unique values:
-
-# 'Antonio Montgomery'
-#  'Cameron Morgan' 
-#  'Dominique Street' 
-#  'Jordan Calbert'
-#  'KAZI 88.7 FM Radio Interview & Preparation'
-#  'Kim Holiday'
-#  'Kiounis Williams' 
-#  'Larry Wallace Jr.'
-#  'Sonya Hosey' 
-#  'Toya Craney'
-
-df['Person'] = (
-    df['Person']
-    .str.strip()
-    .replace({
-        "Larry Wallace Jr": "Larry Wallace Jr.", 
-        "Antonio Montggery": "Antonio Montgomery",
-        "KAZI 88.7 FM Radio Interview & Preparation" : "Unknown",
-        "Eric roberts" : "Eric Roberts",
-        "Eric Robert" : "Eric Roberts",
-    })
-)
-
-# df['Person submitting this form:'] = df['Person submitting this form:'].replace("Kiounis Williams ", "Kiounis Williams")
-
-df_person = df.groupby('Person').size().reset_index(name='Count')
-# print(df_person.value_counts())
-# print(df_person["Person submitting this form:"].unique())
-
-person_bar=px.bar(
-    df_person,
-    x='Person',
-    y='Count',
-    color='Person',
-    text='Count',
-).update_layout(
-    height=650, 
-    width=840,
-    title=dict(
-        text='People Submitting Forms',
-        x=0.5, 
-        font=dict(
-            size=25,
-            family='Calibri',
-            color='black',
-            )
-    ),
-    font=dict(
-        family='Calibri',
-        size=18,
         color='black'
     ),
     xaxis=dict(
-        tickangle=-15,  # Rotate x-axis labels for better readability
-        tickfont=dict(size=18),  # Adjust font size for the tick labels
         title=dict(
-            # text=None,
-            text="Name",
-            font=dict(size=20),  # Font size for the title
+            text="Response",
+            font=dict(size=20), 
         ),
-        showticklabels=False  # Hide x-tick labels
-        # showticklabels=True  # Hide x-tick labels
+        tickmode='array',
+        tickangle=0,
+        # showticklabels=True,
+        showticklabels=False,
     ),
     yaxis=dict(
         title=dict(
-            text='Count',
-            font=dict(size=20),  # Font size for the title
+            text="Count",
+            font=dict(size=20), 
         ),
     ),
     legend=dict(
-        # title='Support',
-        title_text='',
-        orientation="v",  # Vertical legend
-        x=1.05,  # Position legend to the right
-        y=1,  # Position legend at the top
-        xanchor="left",  # Anchor legend to the left
-        yanchor="top",  # Anchor legend to the top
-        # visible=False
-        visible=True
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
     ),
-    hovermode='closest', # Display only one hover label per trace
-    bargap=0.08,  # Reduce the space between bars
-    bargroupgap=0,  # Reduce space between individual bars in groups
 ).update_traces(
-    textposition='outside',
-    hovertemplate='<b>Name:</b> %{label}<br><b>Count</b>: %{y}<extra></extra>'
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Response</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
 )
 
-# Person Pie Chart
-person_pie=px.pie(
-    df_person,
-    names="Person",
-    values='Count'  # Specify the values parameter
+enroll_pie = px.pie(
+    df_enroll,
+    names='Enroll',
+    values='Count',
+    color='Enroll',
 ).update_layout(
-    height=650, 
-    title='Ratio of People Filling Out Forms',
-    title_x=0.5,
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Ratio of Interested in Enrolling as a BMHC Client?', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+
+# ============= Interested in participating in Movement is Medicine? ================= #
+
+# print("MIM Unique Before: \n", df['MIM'].unique().tolist())
+# print("MIM Value Counts: \n", df['MIM'].value_counts())
+
+df['MIM'] = (df['MIM']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A"
+    })          
+)
+
+# print("MIM Unique After: \n", df['MIM'].unique().tolist())
+
+df_mim = df['MIM'].value_counts().reset_index(name='Count')
+
+mim_fig = px.bar(
+    df_mim, 
+    x='MIM', 
+    y='Count',
+    color='MIM', 
+    text='Count',  
+).update_layout(
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Interested in Movement is Medicine Exercise Classes?',
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
     font=dict(
         family='Calibri',
         size=17,
         color='black'
-    )
+    ),
+    xaxis=dict(
+        title=dict(
+            text="Response",
+            font=dict(size=20), 
+        ),
+        tickmode='array',
+        tickangle=0,
+        # showticklabels=True,
+        showticklabels=False,
+    ),
+    yaxis=dict(
+        title=dict(
+            text="Count",
+            font=dict(size=20), 
+        ),
+    ),
+    legend=dict(
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
+    ),
 ).update_traces(
-    rotation=100,
-    textposition='auto',
-    textinfo='value+percent',
-    hovertemplate='<b>%{label} Status</b>: %{value}<extra></extra>',
-    # pull = [0.1 if v < 5 else 0.01 + (v / max(admin_activity["Count"]) * 0.05) for v in admin_activity["Count"]]
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Response</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
 )
 
-# # ========================== DataFrame Table ========================== #
+mim_pie = px.pie(
+    df_mim,
+    names='MIM',
+    values='Count',
+    color='MIM',
+).update_layout(
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Interested in Movement is Medicine Exercise Classes?', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+# =============================== Did you have vitals checked today? ============================ #
+
+# print("Vitals Unique Before: \n", df['Vitals'].unique().tolist())
+# print("Vitals Value Counts: \n", df['Vitals'].value_counts())
+
+df['Vitals'] = (df['Vitals']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A"
+    })          
+)
+
+# print("Vitals Unique After: \n", df['Vitals'].unique().tolist())
+
+df_vitals = df['Vitals'].value_counts().reset_index(name='Count')
+
+vitals_fig = px.bar(
+    df_vitals, 
+    x='Vitals', 
+    y='Count',
+    color='Vitals', 
+    text='Count',  
+).update_layout(
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Did You Have Any Vitals Checked Today?',
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
+    font=dict(
+        family='Calibri',
+        size=17,
+        color='black'
+    ),
+    xaxis=dict(
+        title=dict(
+            text="Response",
+            font=dict(size=20), 
+        ),
+        tickmode='array',
+        tickangle=0,
+        # showticklabels=True,
+        showticklabels=False,
+    ),
+    yaxis=dict(
+        title=dict(
+            text="Count",
+            font=dict(size=20), 
+        ),
+    ),
+    legend=dict(
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
+    ),
+).update_traces(
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Response</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
+)
+
+vitals_pie = px.pie(
+    df_vitals,
+    names='Vitals',
+    values='Count',
+    color='Vitals',
+).update_layout(
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Did You Have Any Vitals Checked Today?', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+# ================= Would you like information on our partnered clinical trials? ==================== #
+
+# print("Clinical Trials Unique Before: \n", df['Clinical Trials'].unique().tolist())
+# print("Clinical Trials Value Counts: \n", df['Clinical Trials'].value_counts())
+
+df['Clinical Trials'] = (df['Clinical Trials']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A"
+    })          
+)
+
+# print("Clinical Trials Unique After: \n", df['Clinical Trials'].unique().tolist())
+
+df_clinical_trials = df['Clinical Trials'].value_counts().reset_index(name='Count')
+
+clinical_fig = px.bar(
+    df_clinical_trials, 
+    x='Clinical Trials', 
+    y='Count',
+    color='Clinical Trials', 
+    text='Count',  
+).update_layout(
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Interested in Clinical Trials Information?',
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
+    font=dict(
+        family='Calibri',
+        size=17,
+        color='black'
+    ),
+    xaxis=dict(
+        title=dict(
+            text="Response",
+            font=dict(size=20), 
+        ),
+        tickmode='array',
+        tickangle=0,
+        # showticklabels=True,
+        showticklabels=False,
+    ),
+    yaxis=dict(
+        title=dict(
+            text="Count",
+            font=dict(size=20), 
+        ),
+    ),
+    legend=dict(
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
+    ),
+).update_traces(
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Response</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
+)
+
+clinical_pie = px.pie(
+    df_clinical_trials,
+    names='Clinical Trials',
+    values='Count',
+    color='Clinical Trials',
+).update_layout(
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Interested in Clinical Trials Information?', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+# =============================== Preferred Method of Contact? ============================ #
+
+# print("Contact Method Unique Before: \n", df['Contact Method'].unique().tolist())
+# print("Contact Method Value Counts: \n", df['Contact Method'].value_counts())
+
+df['Contact Method'] = (df['Contact Method']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A"
+    })          
+)
+
+contact_categories = [
+    "Email",
+    "Text Message",
+    "Phone Call",
+    "N/A",
+]
+
+normalized_categories = {cat.lower().strip(): cat for cat in contact_categories}
+
+# Counter to count matches
+counter = Counter()
+
+for entry in df['Contact Method']:
+    items = [i.strip().lower() for i in entry.split(",")]
+    for item in items:
+        if item in normalized_categories:
+            counter[normalized_categories[item]] += 1
+            
+# for category, count in counter.items():
+#     print(f"Contact Counts: \n {category}: {count}")
+
+# print("Contact Method Unique After: \n", df['Contact Method'].unique().tolist())
+
+# df_contact_method = df['Contact Method'].value_counts().reset_index(name='Count')
+
+df_contact_method = pd.DataFrame(counter.items(), columns=['Contact Method', 'Count']).sort_values(by='Count', ascending=False)
+
+contact_fig = px.bar(
+    df_contact_method, 
+    x='Contact Method', 
+    y='Count',
+    color='Contact Method', 
+    text='Count',  
+).update_layout(
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Preferred Method of Contact',
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
+    font=dict(
+        family='Calibri',
+        size=17,
+        color='black'
+    ),
+    xaxis=dict(
+        title=dict(
+            text="Method",
+            font=dict(size=20), 
+        ),
+        tickmode='array',
+        tickangle=0,
+        showticklabels=False,
+    ),
+    yaxis=dict(
+        title=dict(
+            text="Count",
+            font=dict(size=20), 
+        ),
+    ),
+    legend=dict(
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
+    ),
+).update_traces(
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Method</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
+)
+
+contact_pie = px.pie(
+    df_contact_method,
+    names='Contact Method',
+    values='Count',
+    color='Contact Method',
+).update_layout(
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Preferred Method of Contact', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+# =============================== Which topics are you interested in? ============================ #
+
+# print("Topics Unique Before: \n", df['Topics'].unique().tolist())
+# print("Topics Value Counts: \n", df['Topics'].value_counts())
+
+df['Topics'] = (df['Topics']
+    .astype(str)
+    .str.strip()
+    .replace({
+        "" : "N/A",
+        "Preventative Care (e.g., screenings, healthy lifestyle)" : "Preventative Care"
+    })          
+)
+
+topics_categories = [
+    "Health Insurance Options",
+    "Preventative Care",
+    "Mental Health Resources",
+    "Chronic Disease Management",
+]
+
+normalized_categories = {cat.lower().strip(): cat for cat in topics_categories}
+
+# Counter to count matches
+counter = Counter()
+
+for entry in df['Topics']:
+    items = [i.strip().lower() for i in entry.split(",")]
+    for item in items:
+        if item in normalized_categories:
+            counter[normalized_categories[item]] += 1
+            
+# for category, count in counter.items():
+#     print(f"Contact Counts: \n {category}: {count}")
+
+# print("Topics Unique After: \n", df['Topics'].unique().tolist())
+
+# df_topics = df['Topics'].value_counts().reset_index(name='Count')
+
+df_topics = pd.DataFrame(counter.items(), columns=['Topics', 'Count']).sort_values(by='Count', ascending=False)
+
+topics_fig = px.bar(
+    df_topics, 
+    x='Topics', 
+    y='Count',
+    color='Topics', 
+    text='Count',  
+).update_layout(
+    height=600, 
+    width=1050,
+    title=dict(
+        text=f'{current_month} Topics of Interest',
+        x=0.5, 
+        font=dict(
+            size=22,
+            family='Calibri',
+            color='black',
+        )
+    ),
+    font=dict(
+        family='Calibri',
+        size=17,
+        color='black'
+    ),
+    xaxis=dict(
+        title=dict(
+            text="Topic",
+            font=dict(size=20), 
+        ),
+        tickmode='array',
+        tickangle=0,
+        showticklabels=False,
+    ),
+    yaxis=dict(
+        title=dict(
+            text="Count",
+            font=dict(size=20), 
+        ),
+    ),
+    legend=dict(
+        title='',
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top"
+    ),
+).update_traces(
+    texttemplate='%{text}',
+    textfont=dict(size=20),  
+    textposition='auto', 
+    textangle=0, 
+    hovertemplate='<b>Topic</b>: %{x}<br><b>Count</b>: %{y}<extra></extra>'
+)
+
+topics_pie = px.pie(
+    df_topics,
+    names='Topics',
+    values='Count',
+    color='Topics',
+).update_layout(
+    height=600,
+    title=dict(
+        x=0.5,
+        text=f'{current_month} Topics of Interest', 
+        font=dict(
+            size=22,  
+            family='Calibri',  
+            color='black'  
+        ),
+    ),  
+    legend=dict(
+        title=None,
+        orientation="v",
+        x=1.05,
+        xanchor="left",
+        y=1,
+        yanchor="top" 
+    ),
+    margin=dict(t=60, r=0, b=60, l=0)  
+).update_traces(
+    rotation=-40,
+    textfont=dict(size=19),  
+    texttemplate='%{value}<br>(%{percent:.2%})',
+    hovertemplate='<b>%{label}</b>: %{value}<extra></extra>'
+)
+
+# ========================== Feedback Table ========================== #
+
+df_feedback = df[['Feedback']]
+
+# exclude empty rows
+df_feedback = df_feedback[df_feedback['Feedback'].str.strip() != '']
 
 # Engagement Table
-engagement_table = go.Figure(data=[go.Table(
+feedback_table = go.Figure(data=[go.Table(
+    # columnwidth=[50, 50, 50],  # Adjust the width of the columns
+    header=dict(
+        values=list(df_feedback.columns),
+        fill_color='paleturquoise',
+        align='center',
+        height=30,  # Adjust the height of the header cells
+        # line=dict(color='black', width=1),  # Add border to header cells
+        font=dict(size=12)  # Adjust font size
+    ),
+    cells=dict(
+        values=[df[col] for col in df_feedback.columns],
+        fill_color='lavender',
+        align='left',
+        height=25,  # Adjust the height of the cells
+        # line=dict(color='black', width=1),  # Add border to cells
+        font=dict(size=12)  # Adjust font size
+    )
+)])
+
+feedback_table.update_layout(
+    # margin=dict(l=0, r=0, t=0, b=0),  # Remove margins
+    height=500,
+    # width=800, 
+    paper_bgcolor='rgba(0,0,0,0)',  # Transparent background
+    plot_bgcolor='rgba(0,0,0,0)'  # Transparent plot area
+)
+
+# ========================== DataFrame Table ========================== #
+
+# Engagement Table
+hc_table = go.Figure(data=[go.Table(
     # columnwidth=[50, 50, 50],  # Adjust the width of the columns
     header=dict(
         values=list(df.columns),
@@ -774,368 +1298,372 @@ engagement_table = go.Figure(data=[go.Table(
     )
 )])
 
-engagement_table.update_layout(
-    margin=dict(l=50, r=50, t=30, b=40),  # Remove margins
-    height=700,
-    # width=1500,  # Set a smaller width to make columns thinner
+hc_table.update_layout(
+    # margin=dict(l=50, r=50, t=30, b=60),  # Remove margins
+    height=600,
+    # width=2000,  
     paper_bgcolor='rgba(0,0,0,0)',  # Transparent background
     plot_bgcolor='rgba(0,0,0,0)'  # Transparent plot area
 )
 
-# Group by 'Entity name:' dataframe
-entity_name_group = df.groupby('Entity').size().reset_index(name='Count')
-
-# Entity Name Table
-entity_name_table = go.Figure(data=[go.Table(
-    header=dict(
-        values=list(entity_name_group.columns),
-        fill_color='paleturquoise',
-        align='center',
-        height=30,
-        font=dict(size=12)
-    ),
-    cells=dict(
-        values=[entity_name_group[col] for col in entity_name_group.columns],
-        fill_color='lavender',
-        align='left',
-        height=25,
-        font=dict(size=12)
-    )
-)])
-
-entity_name_table.update_layout(
-    margin=dict(l=50, r=50, t=30, b=40),
-    height=900,
-    width=780,
-    paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)'
-)
-
 # ============================== Dash Application ========================== #
 
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
-
 app = dash.Dash(__name__)
-server = app.server
+server= app.server 
 
 app.layout = html.Div(
-    children=[ 
+  children=[ 
+    html.Div(
+        className='divv', 
+        children=[ 
+          html.H1(
+              'Healthy Cuts Report', 
+              className='title'),
+          html.H2( 
+              f'{current_month} {report_year}', 
+              className='title2'),
+          html.Div(
+              className='btn-box', 
+              children=[
+                  html.A(
+                    'Repo',
+                    href= f'https://github.com/CxLos/HC_{current_month}_{report_year}',
+                    className='btn'),
+    ]),
+  ]),    
+
+# Data Table
+html.Div(
+    className='row0',
+    children=[
         html.Div(
-            className='divv', 
-            children=[ 
-                html.H1('GudLife Report', className='title'),
-                html.H1('January - April 2025', className='title2'),
-                html.Div(
-                    className='btn-box', 
-                    children=[
-                        html.A(
-                            'Repo',
-                            href='https://github.com/CxLos/Eng_Mar_2025',
-                            className='btn'
-                        )
-                    ]
+            className='table',
+            children=[
+                html.H1(
+                    className='table-title',
+                    children='Healthy Cuts Table'
                 )
             ]
         ),
-        
-        # Data Table
-        # html.Div(
-        #     className='row0',
-        #     children=[
-        #         html.Div(
-        #             className='table',
-        #             children=[
-        #                 html.H1(
-        #                     className='table-title',
-        #                     children='Engagement Data Table'
-        #                 )
-        #             ]
-        #         ),
-        #         html.Div(
-        #             className='table2', 
-        #             children=[
-        #                 dcc.Graph(
-        #                     className='data',
-        #                     figure=engagement_table
-        #                 )
-        #             ]
-        #         )
-        #     ]
-        # ),
-
-        # Row 1: Engagements and Hours
         html.Div(
-            className='row1',
+            className='table2', 
+            children=[
+                dcc.Graph(
+                    className='data',
+                    figure=hc_table
+                )
+            ]
+        )
+    ]
+),
+
+html.Div(
+    className='row1',
+    children=[
+
+        html.Div(
+            className='graph11',
             children=[
                 html.Div(
-                    className='graph11',
-                    children=[
-                        html.Div(className='high1', children=['GudLife Engagements:']),
-                        html.Div(
-                            className='circle1',
-                            children=[
-                                html.Div(
-                                    className='hilite',
-                                    children=[html.H1(className='high2', children=[total_engagements])]
-                                )
-                            ]
-                        )
-                    ]
+                    className='high3',
+                    children=[f'{current_month} Healthy Cuts Interactions']
                 ),
                 html.Div(
-                    className='graph22',
+                    className='circle2',
                     children=[
-                        html.Div(className='high3', children=['GudLife Hours:']),
                         html.Div(
-                            className='circle2',
+                            className='hilite',
                             children=[
-                                html.Div(
-                                    className='hilite',
-                                    children=[html.H1(className='high4', children=[engagement_hours])]
-                                )
+                                html.H1(
+                                    className='high4',
+                                    children=[hc_interactions]
+                                ),
                             ]
-                        ) 
-                    ]
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        html.Div(
+            className='graph22',
+            children=[
+                html.Div(
+                    className='high1',
+                    children=[f'{current_month} Placeholder']
+                ),
+                html.Div(
+                    className='circle1',
+                    children=[
+                        html.Div(
+                            className='hilite',
+                            children=[
+                                html.H1(
+                                    className='high2',
+                                    # children=[df_duration]
+                                ),
+                            ]
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=age_fig
                 )
             ]
         ),
-
-        # Row 1: Engagements and Hours
         html.Div(
-            className='row1',
+            className='graph2',
             children=[
-                html.Div(
-                    className='graph11',
-                    children=[
-                        html.Div(className='high1', children=['Travel Hours']),
-                        html.Div(
-                            className='circle1',
-                            children=[
-                                html.Div(
-                                    className='hilite',
-                                    children=[html.H1(className='high2', children=[total_travel_time])]
-                                )   
-                            ]
-                        )
-                    ]
-                ),
-                html.Div(
-                    className='graph2',
-                    children=[
-                        dcc.Graph(
-                            figure=status_pie
-                        )
-                    ]
+                dcc.Graph(
+                    figure=age_pie
                 )
             ]
         ),
-        
-        html.Div(
-            className='row3',
-            children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=admin_bar
-                        )
-                    ]
-                ),
-            ]
-        ),   
-        
-        html.Div(
-            className='row3',
-            children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=admin_pie
-                        )
-                    ]
-                ),
-            ]
-        ),   
+    ]
+),
 
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
         html.Div(
-            className='row3',
+            className='graph1',
             children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=care_bar
-                        )
-                    ]
-                ),
-            ]
-        ),   
-
-        html.Div(
-            className='row3',
-            children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=care_pie
-                        )
-                    ]
-                ),
-            ]
-        ),   
-
-        html.Div(
-            className='row3',
-            children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=community_bar
-                        )
-                    ]
-                ),
-            ]
-        ),   
-
-        html.Div(
-            className='row3',
-            children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=community_pie
-                        )
-                    ]
-                ),
-            ]
-        ),   
-
-        # html.Div(
-        #     className='row3',
-        #     children=[
-        #         html.Div(
-        #             className='graph1',
-        #             children=[
-        #                 dcc.Graph(
-        #                     figure=community_bar
-        #                 )
-        #             ]
-        #         ),
-        #         html.Div(
-        #             className='graph2',
-        #             children=[
-        #                 dcc.Graph(
-        #                     figure=community_pie
-        #                 )
-        #             ]
-        #         )
-        #     ]
-        # ),   
-
-        html.Div(
-            className='row3',
-            children=[
-                html.Div(
-                    className='graph1',
-                    children=[
-                        dcc.Graph(
-                            figure=person_bar
-                        )
-                    ]
-                ),
-                html.Div(
-                    className='graph2',
-                    children=[
-                        dcc.Graph(
-                            figure=person_pie
-                        )
-                    ]
+                dcc.Graph(
+                    figure=useful_fig
                 )
             ]
-        ),   
-        
-# ROW 2
-# html.Div(
-#     className='row2',
-#     children=[
-#         html.Div(
-#             className='graph3',
-#             children=[
-#                 html.Div(
-#                     className='table',
-#                     children=[
-#                         html.H1(
-#                             className='table-title',
-#                             children='Entity Name Table'
-#                         )
-#                     ]
-#                 ),
-#                 html.Div(
-#                     className='table2', 
-#                     children=[
-#                         dcc.Graph(
-#                             className='data',
-#                             # figure=entity_name_table
-#                         )
-#                     ]
-#                 )
-#             ]
-#         ),
-#         html.Div(
-#             className='graph4',
-#             children=[                
-#               html.Div(
-#                     className='table',
-#                     children=[
-#                         html.H1(
-#                             className='table-title',
-#                             children=''
-#                         )
-#                     ]
-#                 ),
-#                 html.Div(
-#                     className='table2', 
-#                     children=[
-#                         dcc.Graph(
-                            
-#                         )
-#                     ]
-#                 )
-   
-#             ]
-#         )
-#     ]
-# ),
-
+        ),
         html.Div(
-            className='row3',
+            className='graph2',
             children=[
-                html.Div(
-                    className='graph33',
-                    children=[
-                        dcc.Graph(
-                            figure=entity_name_table
-                        )
-                    ]
-                ),
+                dcc.Graph(
+                    figure=useful_pie
+                )
             ]
-        ),   
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=hc_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=hc_pie
+                )
+            ]
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=enroll_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=enroll_pie
+                )
+            ]
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=mim_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=mim_pie
+                )
+            ]
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=vitals_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=vitals_pie
+                )
+            ]
+        ),
+    ]
+),
+
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=clinical_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=clinical_pie
+                )
+            ]
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=contact_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=contact_pie
+                )
+            ]
+        ),
+    ]
+),
+
+# ROW 1
+html.Div(
+    className='row1',
+    children=[
+        html.Div(
+            className='graph1',
+            children=[
+                dcc.Graph(
+                    figure=topics_fig
+                )
+            ]
+        ),
+        html.Div(
+            className='graph2',
+            children=[
+                dcc.Graph(
+                    figure=topics_pie
+                )
+            ]
+        ),
+    ]
+),
+
+html.Div(
+    className='row4',
+    children=[
+        html.Div(
+            className='graph5',
+            children=[
+                dcc.Graph(
+                    figure=zip_fig
+                )
+            ]
+        )
+    ]
+),
+
+html.Div(
+    className='row0',
+    children=[
+        html.Div(
+            className='table',
+            children=[
+                html.H1(
+                    className='table-title',
+                    children='Feedback Table'
+                )
+            ]
+        ),
+        html.Div(
+            className='table22', 
+            children=[
+                dcc.Graph(
+                    className='data',
+                    figure=feedback_table
+                )
+            ]
+        )
+    ]
+),
 ])
 
 print(f"Serving Flask app '{current_file}'! 🚀")
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=
+                   True)
                 #    False)
 # =================================== Updated Database ================================= #
 
-# updated_path = f'data/Engagement_{current_month}_{Report Year}.xlsx'
+# updated_path = f'data/Survey_{current_quarter}_{report_year}.xlsx'
 # data_path = os.path.join(script_dir, updated_path)
 # df.to_excel(data_path, index=False)
 # print(f"DataFrame saved to {data_path}")
