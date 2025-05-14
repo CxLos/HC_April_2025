@@ -197,7 +197,7 @@ def categorize_age(age):
 df['Age_Group'] = df['Age'].apply(categorize_age)
 
 # # Group by 'Age_Group' and count the number of patient visits
-df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Patient_Visits')
+df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Count')
 
 # # Sort the result by the minimum age in each group
 age_order = [
@@ -219,14 +219,14 @@ df_decades = df_decades.sort_values('Age_Group')
 age_fig=px.bar(
     df_decades,
     x='Age_Group',
-    y='Patient_Visits',
+    y='Count',
     color='Age_Group',
-    text='Patient_Visits',
+    text='Count',
 ).update_layout(
     height=700, 
     width=1000,
     title=dict(
-        text='Client Age Distribution',
+        text=f'{current_month} Client Age Distribution',
         x=0.5, 
         font=dict(
             size=25,
@@ -277,10 +277,10 @@ age_fig=px.bar(
 age_pie = px.pie(
     df_decades,
     names='Age_Group',
-    values='Patient_Visits',
+    values='Count',
 ).update_layout(
     height=700, 
-    title='Client Age Distribution',
+    title=f'{current_month} Client Age Distribution',
     title_x=0.5,
     font=dict(
         family='Calibri',
