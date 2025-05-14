@@ -170,7 +170,7 @@
   border-right: 2px solid rgb(186, 186, 186);
   border-bottom: 2px solid rgb(186, 186, 186);
   margin: 0px;
-  padding: 0px 20px 0px 0px;
+  padding: 20px 20px 0px 0px;
   width: 48%;
 }
 
@@ -178,7 +178,7 @@
   /* border-left: 2px solid gray; */
   border-bottom: 2px solid rgb(186, 186, 186);
   margin: 0px;
-  padding: 0px 0px 0px 30px;
+  padding: 20px 0px 0px 30px;
   width: 48%;
 }
 
