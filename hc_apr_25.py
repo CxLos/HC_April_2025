@@ -172,10 +172,32 @@ hc_interactions = len(df)
 
 # ------------------------------- Age Distribution ---------------------------- #
 
-# # Define a function to categorize ages into age groups
+# print("Age Unique Before: \n", df['Age'].unique().tolist())
+# print("Age Value Counts Before: \n", df['Age'].value_counts())
+
+df['Age'].replace("", pd.NA, inplace=True)
+age_mode = df['Age'].mode()[0]
+# print("Age Mode: ", age_mode)
+
+df['Age'] = (
+    df['Age']
+        .astype(str)
+        .str.strip()
+        .replace({
+            pd.NA: age_mode,
+        })
+)
+
+# convert to numeric, forcing errors to NaN
+df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
+
+# print("Age Unique After: \n", df['Age'].unique().tolist())
+# print("Age Value Counts After: \n", df['Age'].value_counts())
+
+# Function to categorize ages into age groups
 def categorize_age(age):
     if age == "":
-        return "N/A"
+        return age_mode
     elif 10 <= age <= 19:
         return '10-19'
     elif 20 <= age <= 29:
@@ -193,13 +215,14 @@ def categorize_age(age):
     else:
         return '80+'
 
-# # Apply the function to create the 'Age_Group' column
+ # Apply the function to create the 'Age_Group' column
 df['Age_Group'] = df['Age'].apply(categorize_age)
-
-# # Group by 'Age_Group' and count the number of patient visits
 df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Count')
 
-# # Sort the result by the minimum age in each group
+# print("Age Group Unique After: \n", df['Age_Group'].unique().tolist())
+print("Age Group Value Counts After: \n", df['Age_Group'].value_counts())
+
+# Sort the result by the minimum age in each group
 age_order = [
             '10-19',
             '20-29', 
