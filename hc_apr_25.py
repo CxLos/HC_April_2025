@@ -224,7 +224,7 @@ df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Co
 
 # Sort the result by the minimum age in each group
 age_order = [
-            '10-19',
+            # '10-19',
             '20-29', 
             '30-39', 
             '40-49', 
