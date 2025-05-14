@@ -176,17 +176,10 @@ hc_interactions = len(df)
 # print("Age Value Counts Before: \n", df['Age'].value_counts())
 
 df['Age'].replace("", pd.NA, inplace=True)
+df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
 age_mode = df['Age'].mode()[0]
 # print("Age Mode: ", age_mode)
-
-df['Age'] = (
-    df['Age']
-        .astype(str)
-        .str.strip()
-        .replace({
-            pd.NA: age_mode,
-        })
-)
+df['Age'].fillna(age_mode, inplace=True)
 
 # convert to numeric, forcing errors to NaN
 df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
@@ -220,7 +213,7 @@ df['Age_Group'] = df['Age'].apply(categorize_age)
 df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Count')
 
 # print("Age Group Unique After: \n", df['Age_Group'].unique().tolist())
-# print("Age Group Value Counts After: \n", df['Age_Group'].value_counts())
+print("Age Group Value Counts After: \n", df['Age_Group'].value_counts())
 
 # Sort the result by the minimum age in each group
 age_order = [
