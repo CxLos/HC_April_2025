@@ -196,7 +196,7 @@ df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
 
 # Function to categorize ages into age groups
 def categorize_age(age):
-    if age == "":
+    if pd.isna(age):  # Handle NaN values
         return age_mode
     elif 10 <= age <= 19:
         return '10-19'
@@ -220,7 +220,7 @@ df['Age_Group'] = df['Age'].apply(categorize_age)
 df_decades = df.groupby('Age_Group',  observed=True).size().reset_index(name='Count')
 
 # print("Age Group Unique After: \n", df['Age_Group'].unique().tolist())
-print("Age Group Value Counts After: \n", df['Age_Group'].value_counts())
+# print("Age Group Value Counts After: \n", df['Age_Group'].value_counts())
 
 # Sort the result by the minimum age in each group
 age_order = [
